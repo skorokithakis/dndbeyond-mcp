@@ -42,7 +42,11 @@ Time from a cold `npx` (empty npm cache) to the server answering `initialize`:
 
 | Source | Time |
 |---|---|
-| `github:...#e8f2d1f` (before prebuilt releases) | 18.0 s |
+| Release tarball (pinned URL) | 4.8 to 6.1 s |
+| `github:...#<short sha>` | 16 to 18 s |
+| `github:...#<full 40-character sha>` | 38 s |
+
+These numbers come from one machine with npm 11.19.1, so treat them as relative. With a full 40-character sha, npm clones, installs and builds the repository four times instead of once. If you have to use the `github:` form, pin a short sha.
 
 ## Setup
 
