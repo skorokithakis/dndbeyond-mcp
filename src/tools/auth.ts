@@ -1,4 +1,3 @@
-import { runAuthFlow } from "../../setup/auth-flow.js";
 import { isAuthenticated } from "../api/auth.js";
 import type { DdbClient } from "../api/client.js";
 
@@ -7,7 +6,45 @@ interface CallToolResult {
   content: Array<{ type: "text"; text: string }>;
 }
 
+function isMissingPlaywrightError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error as NodeJS.ErrnoException).code === "ERR_MODULE_NOT_FOUND" &&
+    error.message.includes("playwright")
+  );
+}
+
+function authFailure(error: unknown): CallToolResult {
+  const message = error instanceof Error ? error.message : String(error);
+  return {
+    content: [
+      {
+        type: "text",
+        text: `Authentication failed: ${message}`,
+      },
+    ],
+  };
+}
+
 export async function setupAuth(): Promise<CallToolResult> {
+  let runAuthFlow: () => Promise<void>;
+
+  try {
+    ({ runAuthFlow } = await import("../../setup/auth-flow.js"));
+  } catch (error) {
+    if (isMissingPlaywrightError(error)) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "Playwright is not installed; clone the repo, run npm install, then npm run setup.",
+          },
+        ],
+      };
+    }
+    return authFailure(error);
+  }
+
   try {
     await runAuthFlow();
     return {
@@ -19,15 +56,7 @@ export async function setupAuth(): Promise<CallToolResult> {
       ],
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Authentication failed: ${message}`,
-        },
-      ],
-    };
+    return authFailure(error);
   }
 }
 

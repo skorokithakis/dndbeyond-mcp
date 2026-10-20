@@ -14,27 +14,48 @@ A TypeScript MCP (Model Context Protocol) server for D&D Beyond. Gives Claude (a
 
 ## Installation
 
-You can run this server without installing via `npx`:
+The package is not on the npm registry. Every push to `main` publishes a prebuilt tarball as a GitHub release, so you can run the server with `npx` and nothing gets compiled at install time.
+
+Pinned to a commit (recommended, especially for automated runners):
 
 ```bash
-npx dndbeyond-mcp
+npx -y https://github.com/skorokithakis/dndbeyond-mcp/releases/download/build-<full commit sha>/dndbeyond-mcp.tgz
 ```
 
-Or install globally:
+Latest build:
 
 ```bash
-npm install -g dndbeyond-mcp
+npx -y https://github.com/skorokithakis/dndbeyond-mcp/releases/latest/download/dndbeyond-mcp.tgz
 ```
+
+`npx` caches packages by URL, so the "latest" URL can keep serving an old cached build. Use the pinned URL if you need a specific version.
+
+You can also run straight from the repository. This is slower, because npm installs the dev dependencies and compiles the TypeScript on every cold install:
+
+```bash
+npx -y github:skorokithakis/dndbeyond-mcp#<commit sha>
+```
+
+### Cold start
+
+Time from a cold `npx` (empty npm cache) to the server answering `initialize`:
+
+| Source | Time |
+|---|---|
+| `github:...#e8f2d1f` (before prebuilt releases) | 18.0 s |
 
 ## Setup
 
-Before using the server, authenticate with D&D Beyond:
+Authentication uses Playwright to open your installed Google Chrome, so it needs Chrome and a clone of the repository. The `npx` installs above don't include Playwright, and `setup_auth` will tell you so when you call it.
 
 ```bash
-npx dndbeyond-mcp setup
+git clone https://github.com/skorokithakis/dndbeyond-mcp.git
+cd dndbeyond-mcp
+npm install
+npm run setup
 ```
 
-This opens a browser window where you log into D&D Beyond normally. The server captures your session cookie automatically and saves it to `~/.dndbeyond-mcp/config.json`.
+This opens a browser window where you log into D&D Beyond normally. The server captures your session cookie automatically and saves it to `~/.dndbeyond-mcp/config.json`, which the server reads however you run it.
 
 ## Claude Desktop Configuration
 
@@ -48,7 +69,7 @@ Add this to your Claude Desktop configuration file:
   "mcpServers": {
     "dndbeyond": {
       "command": "npx",
-      "args": ["-y", "dndbeyond-mcp"]
+      "args": ["-y", "https://github.com/skorokithakis/dndbeyond-mcp/releases/latest/download/dndbeyond-mcp.tgz"]
     }
   }
 }
@@ -91,7 +112,7 @@ After adding the configuration, restart Claude Desktop.
 - `delete_homebrew_magic_item` — Destructively delete an item (soft delete on D&D Beyond)
 
 ### Utility
-- `setup_auth` — Re-run login flow
+- `setup_auth` — Re-run login flow (only works from a repository clone with Playwright installed)
 - `check_auth` — Verify session is valid
 
 ## Resources

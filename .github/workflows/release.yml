@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Pack tarball
+        run: |
+          set -euo pipefail
+          tarball="$(npm pack --silent | tail -n 1)"
+          test -f "$tarball"
+          mv "$tarball" dndbeyond-mcp.tgz
+          ls -l dndbeyond-mcp.tgz
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="build-${GITHUB_SHA}"
+          title="Build ${GITHUB_SHA:0:7}"
+          notes="Prebuilt tarball for commit ${GITHUB_SHA}. Run with: npx -y https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/dndbeyond-mcp.tgz"
+
+          if gh release view "$tag" --json tagName >/dev/null 2>&1; then
+            echo "Release $tag already exists; replacing its asset."
+            gh release upload "$tag" dndbeyond-mcp.tgz --clobber
+          elif ! gh release create "$tag" dndbeyond-mcp.tgz \
+            --target "$GITHUB_SHA" \
+            --title "$title" \
+            --notes "$notes"; then
+            # The release may have been created concurrently, or the tag may
+            # already exist; fall back to uploading to the existing release.
+            gh release upload "$tag" dndbeyond-mcp.tgz --clobber
+          fi
