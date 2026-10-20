@@ -22,6 +22,7 @@
   ],
   "scripts": {
     "build": "tsc",
+    "prepare": "npm run build",
     "dev": "tsc --watch",
     "start": "node build/src/index.js",
     "setup": "node build/setup/auth-flow.js",
