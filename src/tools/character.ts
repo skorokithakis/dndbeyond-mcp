@@ -1,5 +1,6 @@
 import type { DdbClient } from "../api/client.js";
 import { ENDPOINTS } from "../api/endpoints.js";
+import { getUserId } from "../api/auth.js";
 import { HttpError } from "../resilience/index.js";
 import type {
   DdbCharacter,
@@ -11,7 +12,12 @@ import type {
   DdbRacialTrait,
   DdbInventoryItem,
 } from "../types/character.js";
-import type { DdbCampaign, DdbCampaignCharacter2 } from "../types/api.js";
+import type {
+  DdbCampaign,
+  DdbCampaignCharacter2,
+  DdbUserCharacterList,
+  DdbUserCharacterListItem,
+} from "../types/api.js";
 import { fuzzyMatch, levenshteinDistance } from "../utils/fuzzy-match.js";
 import { ABILITY_NAMES, ABILITY_SUBTYPE_MAP, calculateAbilityModifier, sumModifierBonuses, computeFinalAbilityScore, computeLevel, calculateMaxHp, calculateCurrentHp, calculateAc } from "../utils/character-calculations.js";
 
@@ -918,43 +924,36 @@ function formatCharacter(char: DdbCharacter): string {
   return sections.join("\n");
 }
 
-async function findCharacterByName(client: DdbClient, name: string): Promise<number | null> {
-  const campaignsResponse = await client.get<DdbCampaign[]>(
-    ENDPOINTS.campaign.list(),
-    "campaigns",
-    300_000
+async function listOwnCharacters(client: DdbClient): Promise<DdbUserCharacterListItem[]> {
+  const userId = await getUserId();
+  const response = await client.get<DdbUserCharacterList>(
+    ENDPOINTS.character.list(userId),
+    `characters:${userId}`,
+    60_000
   );
+  return response.characters;
+}
 
-  // Fetch characters from each campaign using the new endpoint
-  const allCharacters: Array<{ id: number; name: string }> = [];
-  for (const campaign of campaignsResponse) {
-    const characters = await client.get<DdbCampaignCharacter2[]>(
-      ENDPOINTS.campaign.characters(campaign.id),
-      `campaign:${campaign.id}:characters`,
-      300_000
-    );
-    allCharacters.push(...characters.map((char) => ({
-      id: char.id,
-      name: char.name,
-    })));
-  }
-
+function matchCharacterByName(
+  characters: Array<{ id: number; name: string }>,
+  name: string
+): number | null {
   // 1. Exact match (case-insensitive)
-  const exactMatch = allCharacters.find(
+  const exactMatch = characters.find(
     (char) => char.name.toLowerCase() === name.toLowerCase()
   );
   if (exactMatch) return exactMatch.id;
 
   // 2. Substring match (case-insensitive)
   const lowerName = name.toLowerCase();
-  const substringMatches = allCharacters.filter(
+  const substringMatches = characters.filter(
     (char) => char.name.toLowerCase().includes(lowerName)
   );
   if (substringMatches.length === 1) return substringMatches[0].id;
 
   // 3. Fuzzy match via Levenshtein distance — check full names and individual words
   const fuzzyResults: Array<{ id: number; name: string }> = [];
-  for (const char of allCharacters) {
+  for (const char of characters) {
     const fullDistance = levenshteinDistance(lowerName, char.name.toLowerCase());
     if (fullDistance <= 3) {
       fuzzyResults.push(char);
@@ -972,6 +971,38 @@ async function findCharacterByName(client: DdbClient, name: string): Promise<num
   if (fuzzyResults.length === 1) return fuzzyResults[0].id;
 
   return null;
+}
+
+async function findCharacterByName(client: DdbClient, name: string): Promise<number | null> {
+  // Search the user's own characters before campaign characters: owned characters are
+  // always readable, and a campaign character must not make an owned match ambiguous.
+  const ownCharacters = await listOwnCharacters(client);
+  const ownMatch = matchCharacterByName(ownCharacters, name);
+  if (ownMatch !== null) return ownMatch;
+
+  const campaignsResponse = await client.get<DdbCampaign[]>(
+    ENDPOINTS.campaign.list(),
+    "campaigns",
+    300_000
+  );
+
+  // Fetch characters from each campaign using the new endpoint
+  const seenIds = new Set(ownCharacters.map((char) => char.id));
+  const campaignCharacters: Array<{ id: number; name: string }> = [];
+  for (const campaign of campaignsResponse) {
+    const characters = await client.get<DdbCampaignCharacter2[]>(
+      ENDPOINTS.campaign.characters(campaign.id),
+      `campaign:${campaign.id}:characters`,
+      300_000
+    );
+    for (const char of characters) {
+      if (seenIds.has(char.id)) continue;
+      seenIds.add(char.id);
+      campaignCharacters.push({ id: char.id, name: char.name });
+    }
+  }
+
+  return matchCharacterByName(campaignCharacters, name);
 }
 
 export async function getCharacter(
@@ -1010,28 +1041,9 @@ export async function getCharacter(
 export async function listCharacters(
   client: DdbClient
 ): Promise<{ content: Array<{ type: "text"; text: string }> }> {
-  const campaignsResponse = await client.get<DdbCampaign[]>(
-    ENDPOINTS.campaign.list(),
-    "campaigns",
-    300_000
-  );
+  const characters = await listOwnCharacters(client);
 
-  // Fetch characters from each campaign using the characters endpoint
-  const allCharacters: Array<{ id: number; name: string; campaignName: string }> = [];
-  for (const campaign of campaignsResponse) {
-    const characters = await client.get<DdbCampaignCharacter2[]>(
-      ENDPOINTS.campaign.characters(campaign.id),
-      `campaign:${campaign.id}:characters`,
-      300_000
-    );
-    allCharacters.push(...characters.map((char) => ({
-      id: char.id,
-      name: char.name,
-      campaignName: campaign.name,
-    })));
-  }
-
-  if (allCharacters.length === 0) {
+  if (characters.length === 0) {
     return {
       content: [
         {
@@ -1042,26 +1054,9 @@ export async function listCharacters(
     };
   }
 
-  const characterDetails = await Promise.all(
-    allCharacters.map(async (char) => {
-      const details = await client.get<DdbCharacter>(
-        ENDPOINTS.character.get(char.id),
-        `character:${char.id}`,
-        60_000
-      );
-      return {
-        name: details.name,
-        race: details.race.fullName,
-        classes: formatClasses(details),
-        level: computeLevel(details),
-        campaign: char.campaignName,
-      };
-    })
-  );
-
-  const lines = characterDetails.map(
+  const lines = characters.map(
     (char) =>
-      `${char.name} - ${char.race} ${char.classes} (Level ${char.level}) - ${char.campaign}`
+      `${char.name} - ${char.raceName} ${char.classDescription} (Level ${char.level}) - ${char.campaignName ?? "No campaign"}`
   );
 
   return {

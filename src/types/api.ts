@@ -46,3 +46,22 @@ export interface DdbCampaignCharacter2 {
   characterStatus: number;
   isAssigned: boolean;
 }
+
+// Entry from character-service's "my characters" list. It carries enough display data
+// to render a list without fetching every character sheet. campaignId and campaignName
+// are null for characters that are not in a campaign.
+export interface DdbUserCharacterListItem {
+  id: number;
+  level: number;
+  name: string;
+  raceName: string;
+  classDescription: string;
+  campaignId: number | null;
+  campaignName: string | null;
+}
+
+export interface DdbUserCharacterList {
+  characterSlotLimit: number;
+  canUnlockCharacters: boolean;
+  characters: DdbUserCharacterListItem[];
+}

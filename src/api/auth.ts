@@ -73,15 +73,28 @@ export async function isAuthenticated(): Promise<boolean> {
   return session !== null;
 }
 
-export async function getUserId(): Promise<number | null> {
-  const cookies = await getAllCookies();
-  const userIdCookie = cookies.find((c) => c.name === "User.ID");
-  if (!userIdCookie) return null;
-  const parsed = parseInt(userIdCookie.value, 10);
-  return isNaN(parsed) ? null : parsed;
+const COBALT_TOKEN_URL = "https://auth-service.dndbeyond.com/v1/cobalt-token";
+
+// The saved cookies contain no User.ID cookie, so the only reliable source of the
+// user ID is the cobalt token's claims. The ID is a string claim, but every endpoint
+// that takes it expects a number.
+const USER_ID_CLAIM = "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier";
+
+interface CobaltTokenClaims {
+  [USER_ID_CLAIM]?: string;
 }
 
-const COBALT_TOKEN_URL = "https://auth-service.dndbeyond.com/v1/cobalt-token";
+export async function getUserId(): Promise<number> {
+  const token = await getCobaltToken();
+  const payload = JSON.parse(
+    Buffer.from(token.split(".")[1], "base64url").toString("utf-8")
+  ) as CobaltTokenClaims;
+  const userId = Number(payload[USER_ID_CLAIM]);
+  if (!Number.isInteger(userId)) {
+    throw new Error("Cobalt token is missing the user ID claim. Run setup again.");
+  }
+  return userId;
+}
 
 interface CobaltTokenResponse {
   token: string;

@@ -2,7 +2,11 @@ import { describe, it, expect, vi } from "vitest";
 import { getCharacter, listCharacters } from "../../src/tools/character.js";
 import type { DdbClient } from "../../src/api/client.js";
 import type { DdbCharacter } from "../../src/types/character.js";
-import type { DdbCampaign } from "../../src/types/api.js";
+import type { DdbCampaign, DdbUserCharacterList } from "../../src/types/api.js";
+
+vi.mock("../../src/api/auth.js", () => ({
+  getUserId: vi.fn().mockResolvedValue(1),
+}));
 
 // Extended mock character for testing detail levels
 function createDetailedMockCharacter(): DdbCharacter {
@@ -209,6 +213,31 @@ const mockCampaignCharacters = [
   { id: 12345, name: "Thorin Ironforge", userId: 2, userName: "player1", avatarUrl: "", characterStatus: 1, isAssigned: true },
 ];
 
+const mockOwnCharacters: DdbUserCharacterList = {
+  characterSlotLimit: 6,
+  canUnlockCharacters: false,
+  characters: [
+    {
+      id: 12345,
+      level: 5,
+      name: "Thorin Ironforge",
+      raceName: "Mountain Dwarf",
+      classDescription: "Fighter/Battle Master",
+      campaignId: 999,
+      campaignName: "Lost Mines of Phandelver",
+    },
+    {
+      id: 54321,
+      level: 2,
+      name: "Rosie Cotton",
+      raceName: "Halfling",
+      classDescription: "Rogue",
+      campaignId: null,
+      campaignName: null,
+    },
+  ],
+};
+
 describe("getCharacter", () => {
   it("should format character data correctly by ID with summary detail", async () => {
     const client = createMockClient();
@@ -234,9 +263,8 @@ describe("getCharacter", () => {
   it("should format character data correctly by name with summary detail", async () => {
     const client = createMockClient();
     vi.mocked(client.get)
-      .mockResolvedValueOnce(mockCampaigns)        // campaign list
-      .mockResolvedValueOnce(mockCampaignCharacters) // characters for campaign 999
-      .mockResolvedValueOnce(mockCharacter);         // character data
+      .mockResolvedValueOnce(mockOwnCharacters)
+      .mockResolvedValueOnce(mockCharacter);
 
     const result = await getCharacter(client, { characterName: "Thorin Ironforge", detail: "summary" });
 
@@ -247,6 +275,7 @@ describe("getCharacter", () => {
   it("should handle missing character by name", async () => {
     const client = createMockClient();
     vi.mocked(client.get)
+      .mockResolvedValueOnce(mockOwnCharacters)
       .mockResolvedValueOnce(mockCampaigns)
       .mockResolvedValueOnce(mockCampaignCharacters);
 
@@ -270,8 +299,7 @@ describe("getCharacter - fuzzy name matching", () => {
   it("should handle exact case-insensitive match", async () => {
     const client = createMockClient();
     vi.mocked(client.get)
-      .mockResolvedValueOnce(mockCampaigns)
-      .mockResolvedValueOnce(mockCampaignCharacters)
+      .mockResolvedValueOnce(mockOwnCharacters)
       .mockResolvedValueOnce(mockCharacter);
 
     const result = await getCharacter(client, { characterName: "thorin ironforge", detail: "summary" });
@@ -283,8 +311,7 @@ describe("getCharacter - fuzzy name matching", () => {
   it("should handle substring match", async () => {
     const client = createMockClient();
     vi.mocked(client.get)
-      .mockResolvedValueOnce(mockCampaigns)
-      .mockResolvedValueOnce(mockCampaignCharacters)
+      .mockResolvedValueOnce(mockOwnCharacters)
       .mockResolvedValueOnce(mockCharacter);
 
     const result = await getCharacter(client, { characterName: "Thorin", detail: "summary" });
@@ -293,11 +320,29 @@ describe("getCharacter - fuzzy name matching", () => {
     expect(result.content[0].text).toContain("Name: Thorin Ironforge");
   });
 
+  it("should not let campaign characters make an owned match ambiguous", async () => {
+    const client = createMockClient();
+    // A campaign character with a similar name must never be consulted: the own
+    // character resolves first, without any campaign requests.
+    vi.mocked(client.get)
+      .mockResolvedValueOnce(mockOwnCharacters)
+      .mockResolvedValueOnce(mockCharacter)
+      .mockResolvedValueOnce(mockCampaigns)
+      .mockResolvedValueOnce([
+        ...mockCampaignCharacters,
+        { id: 67890, name: "Thorin Stonebeard", userId: 3, userName: "player2", avatarUrl: "", characterStatus: 1, isAssigned: true },
+      ]);
+
+    const result = await getCharacter(client, { characterName: "Thorin", detail: "summary" });
+
+    expect(result.content[0].text).toContain("Name: Thorin Ironforge");
+    expect(client.get).toHaveBeenCalledTimes(2);
+  });
+
   it("should handle fuzzy match with typo when only one close match", async () => {
     const client = createMockClient();
     vi.mocked(client.get)
-      .mockResolvedValueOnce(mockCampaigns)
-      .mockResolvedValueOnce(mockCampaignCharacters)
+      .mockResolvedValueOnce(mockOwnCharacters)
       .mockResolvedValueOnce(mockCharacter);
 
     const result = await getCharacter(client, { characterName: "Throin", detail: "summary" });
@@ -309,6 +354,7 @@ describe("getCharacter - fuzzy name matching", () => {
   it("should return not found for no close matches", async () => {
     const client = createMockClient();
     vi.mocked(client.get)
+      .mockResolvedValueOnce(mockOwnCharacters)
       .mockResolvedValueOnce(mockCampaigns)
       .mockResolvedValueOnce(mockCampaignCharacters);
 
@@ -387,8 +433,7 @@ describe("getCharacter with detail levels", () => {
     const detailedChar = createDetailedMockCharacter();
 
     vi.mocked(client.get)
-      .mockResolvedValueOnce(mockCampaigns)
-      .mockResolvedValueOnce(mockCampaignCharacters)
+      .mockResolvedValueOnce(mockOwnCharacters)
       .mockResolvedValueOnce(detailedChar);
 
     const result = await getCharacter(client, {
@@ -403,24 +448,22 @@ describe("getCharacter with detail levels", () => {
 });
 
 describe("listCharacters", () => {
-  it("should return formatted list of characters", async () => {
+  it("should return formatted list of the user's own characters", async () => {
     const client = createMockClient();
-    vi.mocked(client.get)
-      .mockResolvedValueOnce(mockCampaigns)        // campaign list
-      .mockResolvedValueOnce(mockCampaignCharacters) // characters for campaign 999
-      .mockResolvedValueOnce(mockCharacter);         // character data
+    vi.mocked(client.get).mockResolvedValueOnce(mockOwnCharacters);
 
     const result = await listCharacters(client);
 
     expect(result.content).toHaveLength(1);
     const text = result.content[0].text;
     expect(text).toContain("Characters:");
-    expect(text).toContain("Thorin Ironforge - Mountain Dwarf Fighter (Battle Master) 5 (Level 5) - Lost Mines of Phandelver");
+    expect(text).toContain("Thorin Ironforge - Mountain Dwarf Fighter/Battle Master (Level 5) - Lost Mines of Phandelver");
+    expect(text).toContain("Rosie Cotton - Halfling Rogue (Level 2) - No campaign");
   });
 
   it("should handle no characters", async () => {
     const client = createMockClient();
-    vi.mocked(client.get).mockResolvedValue([]);
+    vi.mocked(client.get).mockResolvedValueOnce({ ...mockOwnCharacters, characters: [] });
 
     const result = await listCharacters(client);
 
