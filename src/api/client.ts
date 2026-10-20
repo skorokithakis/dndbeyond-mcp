@@ -8,7 +8,7 @@ export class DdbClient {
   constructor(
     private readonly cache: TtlCache<unknown>,
     private readonly circuitBreaker: CircuitBreaker,
-    private readonly rateLimiter: RateLimiter,
+    readonly rateLimiter: RateLimiter,
   ) {}
 
   get isAuthExpired(): boolean {
@@ -17,6 +17,11 @@ export class DdbClient {
 
   invalidateCache(key: string): void {
     this.cache.invalidate(key);
+  }
+
+  /** Invalidates all cached entries whose key starts with the given prefix. */
+  invalidateCachePrefix(prefix: string): void {
+    this.cache.invalidatePrefix(prefix);
   }
 
   async get<T>(url: string, cacheKey: string, ttl?: number): Promise<T> {

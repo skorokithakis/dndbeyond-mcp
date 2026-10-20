@@ -25,6 +25,8 @@ export interface DdbCharacter {
   configuration: Record<string, unknown>;
   actions: Record<string, DdbAction[]>;
   modifiers: Record<string, DdbModifier[]>;
+  /** Per-character sheet customizations (the Customize panel). */
+  characterValues?: DdbCharacterValue[];
   campaign: { id: number; name: string } | null;
   feats: DdbFeat[];
   notes: DdbNotes;
@@ -185,6 +187,16 @@ export interface DdbModifier {
   friendlySubtypeName: string;
   componentId: number;
   componentTypeId: number;
+}
+
+export interface DdbCharacterValue {
+  typeId: number;
+  value: number | string | null;
+  notes: string | null;
+  valueId: string | number | null;
+  valueTypeId: string | number | null;
+  contextId: number | null;
+  contextTypeId: number | null;
 }
 
 export interface DdbFeat {

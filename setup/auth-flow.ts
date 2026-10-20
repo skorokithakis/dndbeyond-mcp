@@ -1,5 +1,6 @@
 import { chromium } from "playwright";
 import { saveAllCookies } from "../src/api/auth.js";
+import { resetWwwClient } from "../src/api/www.js";
 
 const DDB_LOGIN_URL = "https://www.dndbeyond.com/sign-in";
 
@@ -37,6 +38,7 @@ export async function runAuthFlow(): Promise<void> {
   });
 
   await saveAllCookies(allCookies);
+  resetWwwClient();
   console.error(`Authentication successful! ${allCookies.length} cookies saved.`);
   await browser.close();
 }

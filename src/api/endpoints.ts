@@ -2,6 +2,9 @@ export const DDB_CHARACTER_SERVICE = "https://character-service.dndbeyond.com";
 export const DDB_MONSTER_SERVICE = "https://monster-service.dndbeyond.com";
 export const DDB_WATERDEEP = "https://www.dndbeyond.com";
 
+/** Entity type ID used for homebrew magic items across www and character-service. */
+export const HOMEBREW_MAGIC_ITEM_ENTITY_TYPE_ID = 112130694;
+
 export const ENDPOINTS = {
   character: {
     get: (id: number) => `${DDB_CHARACTER_SERVICE}/character/v5/character/${id}?includeCustomItems=true`,
@@ -32,6 +35,7 @@ export const ENDPOINTS = {
     setFeatChoice: () => `${DDB_CHARACTER_SERVICE}/character/v5/feat/choice`,
     setRace: () => `${DDB_CHARACTER_SERVICE}/character/v5/race`,
     setAbilityScore: () => `${DDB_CHARACTER_SERVICE}/character/v5/character/ability-score`,
+    setCustomValue: () => `${DDB_CHARACTER_SERVICE}/character/v5/custom/value`,
     setPreferences: () => `${DDB_CHARACTER_SERVICE}/character/v5/character/preferences`,
     setAbilityScoreType: () => `${DDB_CHARACTER_SERVICE}/character/v5/character/ability-score/type`,
     setClassLevel: () => `${DDB_CHARACTER_SERVICE}/character/v5/class/level`,
@@ -84,5 +88,46 @@ export const ENDPOINTS = {
   },
   config: {
     json: () => `${DDB_WATERDEEP}/api/config/json`,
+  },
+  homebrew: {
+    myCreations: (options: {
+      name?: string;
+      statuses?: number[];
+      moderationStatuses?: number[];
+      typeId?: number;
+    } = {}) => {
+      const params = new URLSearchParams();
+      if (options.name) params.set("filter-name", options.name);
+      for (const status of options.statuses ?? []) {
+        params.append("filter-status", String(status));
+      }
+      for (const moderationStatus of options.moderationStatuses ?? []) {
+        params.append("filter-moderation-status", String(moderationStatus));
+      }
+      if (options.typeId !== undefined) {
+        params.set("filter-type", String(options.typeId));
+      }
+      const query = params.toString();
+      return `${DDB_WATERDEEP}/my-creations${query ? `?${query}` : ""}`;
+    },
+    /** Generic editor URL; the site redirects to the canonical /{id}-{slug}/edit URL. */
+    editor: (itemId: number) =>
+      `${DDB_WATERDEEP}/homebrew/creations/edit?entityTypeId=${HOMEBREW_MAGIC_ITEM_ENTITY_TYPE_ID}&id=${itemId}`,
+    /** Template picker page; the only way to create an item from an existing template. */
+    createMagicItem: () =>
+      `${DDB_WATERDEEP}/homebrew/creations/create-magic-item`,
+    /** Blank item editor ("Create from Scratch"). */
+    createMagicItemScratch: () =>
+      `${DDB_WATERDEEP}/homebrew/creations/create-magic-item/create`,
+    deleteItem: (itemId: number) =>
+      `${DDB_WATERDEEP}/homebrew/creations/delete?entityTypeId=${HOMEBREW_MAGIC_ITEM_ENTITY_TYPE_ID}&id=${itemId}`,
+    refreshRequestVerificationToken: () =>
+      `${DDB_WATERDEEP}/refresh-request-verification-token`,
+    modifierCreate: (itemId: number | string) =>
+      `${DDB_WATERDEEP}/modifier/create/${itemId}-${HOMEBREW_MAGIC_ITEM_ENTITY_TYPE_ID}/0`,
+    modifierEdit: (modifierId: number | string) =>
+      `${DDB_WATERDEEP}/modifier/${modifierId}/0/edit`,
+    modifierDelete: (modifierId: number | string) =>
+      `${DDB_WATERDEEP}/modifier/${modifierId}/delete`,
   },
 } as const;

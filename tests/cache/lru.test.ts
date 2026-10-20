@@ -47,6 +47,17 @@ describe("TtlCache", () => {
     expect(cache.get("key")).toBeUndefined();
   });
 
+  it("should invalidate keys by prefix", () => {
+    const cache = new TtlCache<string>(60_000);
+    cache.set("character:1", "one");
+    cache.set("character:2", "two");
+    cache.set("items:1", "item");
+    cache.invalidatePrefix("character:");
+    expect(cache.get("character:1")).toBeUndefined();
+    expect(cache.get("character:2")).toBeUndefined();
+    expect(cache.get("items:1")).toBe("item");
+  });
+
   it("should clear all entries", () => {
     const cache = new TtlCache<string>(60_000);
     cache.set("a", "1");

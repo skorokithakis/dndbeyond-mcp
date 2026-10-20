@@ -11,6 +11,7 @@ import type {
   DdbClassFeature,
   DdbRacialTrait,
   DdbInventoryItem,
+  DdbCharacterValue,
 } from "../types/character.js";
 import type {
   DdbCampaign,
@@ -19,7 +20,7 @@ import type {
   DdbUserCharacterListItem,
 } from "../types/api.js";
 import { fuzzyMatch, levenshteinDistance } from "../utils/fuzzy-match.js";
-import { ABILITY_NAMES, ABILITY_SUBTYPE_MAP, sumModifierBonuses, computeFinalAbilityScore, computeLevel, calculateMaxHp, calculateCurrentHp, calculateAc } from "../utils/character-calculations.js";
+import { ABILITY_NAMES, ABILITY_SUBTYPE_MAP, AC_CUSTOM_VALUE_TYPES, sumModifierBonuses, computeFinalAbilityScore, computeLevel, calculateMaxHp, calculateCurrentHp, calculateAc } from "../utils/character-calculations.js";
 import { formatAbilityScores } from "../utils/character-format.js";
 
 interface GetCharacterParams {
@@ -198,6 +199,175 @@ const SKILL_DEFINITIONS: Array<{ name: string; abilityId: number; subType: strin
   { name: "Stealth", abilityId: 2, subType: "stealth" },
   { name: "Survival", abilityId: 5, subType: "survival" },
 ];
+
+// D&D Beyond skill entity IDs (from /api/config/json abilitySkills).
+const SKILL_IDS: Record<string, number> = {
+  athletics: 2,
+  acrobatics: 3,
+  "sleight of hand": 4,
+  stealth: 5,
+  arcana: 6,
+  history: 7,
+  investigation: 8,
+  nature: 9,
+  religion: 10,
+  "animal handling": 11,
+  insight: 12,
+  medicine: 13,
+  perception: 14,
+  survival: 15,
+  deception: 16,
+  intimidation: 17,
+  performance: 18,
+  persuasion: 19,
+};
+
+const SKILL_NAMES_BY_ID: Record<number, string> = {
+  2: "Athletics",
+  3: "Acrobatics",
+  4: "Sleight of Hand",
+  5: "Stealth",
+  6: "Arcana",
+  7: "History",
+  8: "Investigation",
+  9: "Nature",
+  10: "Religion",
+  11: "Animal Handling",
+  12: "Insight",
+  13: "Medicine",
+  14: "Perception",
+  15: "Survival",
+  16: "Deception",
+  17: "Intimidation",
+  18: "Performance",
+  19: "Persuasion",
+};
+
+const ABILITY_ENTITY_TYPE_ID = "1472902489";
+const SKILL_ENTITY_TYPE_ID = "1958004211";
+
+export const CUSTOM_VALUE_TYPE_NAMES = [
+  "ac_override",
+  "ac_base_armor_override",
+  "ac_magic_bonus",
+  "ac_misc_bonus",
+  "saving_throw_override",
+  "saving_throw_magic_bonus",
+  "saving_throw_misc_bonus",
+  "skill_override",
+  "skill_magic_bonus",
+  "skill_misc_bonus",
+] as const;
+
+export type CustomValueTypeName = (typeof CUSTOM_VALUE_TYPE_NAMES)[number];
+
+interface CustomValueTypeDefinition {
+  typeId: number;
+  label: string;
+  target?: "ability" | "skill";
+}
+
+const CUSTOM_VALUE_TYPES: Record<CustomValueTypeName, CustomValueTypeDefinition> = {
+  ac_override: { typeId: AC_CUSTOM_VALUE_TYPES.override, label: "AC override" },
+  ac_base_armor_override: {
+    typeId: AC_CUSTOM_VALUE_TYPES.baseArmorOverride,
+    label: "AC base armor override",
+  },
+  ac_magic_bonus: { typeId: AC_CUSTOM_VALUE_TYPES.magicBonus, label: "AC magic bonus" },
+  ac_misc_bonus: { typeId: AC_CUSTOM_VALUE_TYPES.miscBonus, label: "AC misc bonus" },
+  saving_throw_override: {
+    typeId: 38,
+    label: "saving throw override",
+    target: "ability",
+  },
+  saving_throw_magic_bonus: {
+    typeId: 40,
+    label: "saving throw magic bonus",
+    target: "ability",
+  },
+  saving_throw_misc_bonus: {
+    typeId: 39,
+    label: "saving throw misc bonus",
+    target: "ability",
+  },
+  skill_override: { typeId: 23, label: "skill override", target: "skill" },
+  skill_magic_bonus: { typeId: 25, label: "skill magic bonus", target: "skill" },
+  skill_misc_bonus: { typeId: 24, label: "skill misc bonus", target: "skill" },
+};
+
+const CUSTOM_VALUE_LABELS_BY_TYPE_ID: Record<number, string> = {
+  1: "AC override",
+  2: "AC magic bonus",
+  3: "AC misc bonus",
+  4: "AC base armor override",
+  5: "passive Perception override",
+  6: "passive Investigation override",
+  7: "passive Insight override",
+  9: "notes",
+  10: "fixed value bonus",
+  11: "fixed value override",
+  23: "skill override",
+  24: "skill misc bonus",
+  25: "skill magic bonus",
+  26: "skill proficiency level",
+  27: "skill stat override",
+  38: "saving throw override",
+  39: "saving throw misc bonus",
+  40: "saving throw magic bonus",
+  41: "saving throw proficiency level",
+};
+
+const AC_CUSTOM_VALUE_TYPE_IDS = new Set<number>(
+  Object.values(AC_CUSTOM_VALUE_TYPES)
+);
+
+const SAVING_THROW_CUSTOM_VALUE_TYPE_IDS = new Set([38, 39, 40, 41]);
+const SKILL_CUSTOM_VALUE_TYPE_IDS = new Set([23, 24, 25, 26, 27]);
+
+function customValueTarget(row: DdbCharacterValue): string {
+  if (SAVING_THROW_CUSTOM_VALUE_TYPE_IDS.has(row.typeId)) {
+    const statId = Number(row.valueId);
+    const name = ABILITY_FULL_NAMES[statId] ?? `stat ${row.valueId ?? "?"}`;
+    return ` (${name})`;
+  }
+  if (SKILL_CUSTOM_VALUE_TYPE_IDS.has(row.typeId)) {
+    const skillId = Number(row.valueId);
+    const name = SKILL_NAMES_BY_ID[skillId] ?? `skill ${row.valueId ?? "?"}`;
+    return ` (${name})`;
+  }
+  return "";
+}
+
+function formatCustomValueRow(row: DdbCharacterValue): string {
+  const label =
+    CUSTOM_VALUE_LABELS_BY_TYPE_ID[row.typeId] ?? `type ${row.typeId}`;
+  const value = row.value === null ? "(cleared)" : String(row.value);
+  const notes = row.notes ? `, notes: ${row.notes}` : "";
+  const applied = AC_CUSTOM_VALUE_TYPE_IDS.has(row.typeId)
+    ? " [applied to AC]"
+    : "";
+  return `  - ${label}${customValueTarget(row)}: ${value}${applied}${notes}`;
+}
+
+function formatCustomValueLines(char: DdbCharacter): string[] {
+  return (char.characterValues ?? []).map(formatCustomValueRow);
+}
+
+/**
+ * Rows from characterValues that affect derived stats we do not apply
+ * (saving throws, skills, notes and item customizations). AC rows are applied
+ * by calculateAc and are marked as such.
+ */
+function formatNonAcCustomValues(char: DdbCharacter): string {
+  const rows = (char.characterValues ?? []).filter(
+    (row) => !AC_CUSTOM_VALUE_TYPE_IDS.has(row.typeId)
+  );
+  if (rows.length === 0) return StringUtils.EMPTY;
+  return `--- Custom Values (not applied) ---\n${rows
+    .map(formatCustomValueRow)
+    .join("\n")}`;
+}
+
 
 function hasModifierBySubType(
   modifiers: Record<string, DdbModifier[]>,
@@ -556,6 +726,9 @@ function formatCharacterSheet(char: DdbCharacter): string {
   const proficiencies = formatProficiencies(char);
   if (proficiencies) sections.push(proficiencies.trim());
 
+  const customValues = formatNonAcCustomValues(char);
+  if (customValues) sections.push(customValues);
+
   const spellcasting = formatSpellcasting(char);
   if (spellcasting) {
     sections.push(StringUtils.EMPTY, `--- Spellcasting ---`, spellcasting);
@@ -902,6 +1075,9 @@ function formatCharacter(char: DdbCharacter): string {
     `AC: ${calculateAc(char)}`,
     `\nAbility Scores:\n${formatAbilityScores(char)}`,
   ];
+
+  const customValues = formatNonAcCustomValues(char);
+  if (customValues) sections.push(`\n${customValues}`);
 
   if (char.campaign) {
     sections.push(`\nCampaign: ${char.campaign.name}`);
@@ -1934,6 +2110,176 @@ export async function setAbilityScore(
     [`character:${params.characterId}`]
   );
   return { content: [{ type: "text", text: `Set ${abilityName} to ${params.value} on character ${params.characterId}.` }] };
+}
+
+interface SetCharacterCustomValueParams {
+  characterId: number;
+  valueType: CustomValueTypeName;
+  value: number | null;
+  ability?: string;
+  skill?: string;
+  notes?: string | null;
+}
+
+export async function setCharacterCustomValue(
+  client: DdbClient,
+  params: SetCharacterCustomValueParams
+): Promise<ToolResult> {
+  const definition = CUSTOM_VALUE_TYPES[params.valueType];
+  if (!definition) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Unknown custom value type "${params.valueType}".`,
+        },
+      ],
+    };
+  }
+
+  let valueId: string | null = null;
+  let valueTypeId: string | null = null;
+  let targetLabel = "";
+
+  if (definition.target === "ability") {
+    const ability = params.ability?.trim().toUpperCase();
+    const statIndex = ABILITY_NAMES.findIndex((name) => name === ability);
+    if (statIndex === -1) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `${definition.label} requires ability (STR, DEX, CON, INT, WIS or CHA).`,
+          },
+        ],
+      };
+    }
+    valueId = String(statIndex + 1);
+    valueTypeId = ABILITY_ENTITY_TYPE_ID;
+    targetLabel = ` (${ABILITY_FULL_NAMES[statIndex + 1]})`;
+  } else if (definition.target === "skill") {
+    const normalized = params.skill
+      ?.trim()
+      .toLowerCase()
+      .replace(/[-_]+/g, " ")
+      .replace(/\s+/g, " ");
+    const skillId = normalized ? SKILL_IDS[normalized] : undefined;
+    if (!skillId) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `${definition.label} requires skill (one of: ${Object.values(
+              SKILL_NAMES_BY_ID
+            ).join(", ")}).`,
+          },
+        ],
+      };
+    }
+    valueId = String(skillId);
+    valueTypeId = SKILL_ENTITY_TYPE_ID;
+    targetLabel = ` (${SKILL_NAMES_BY_ID[skillId]})`;
+  }
+
+  // Removal is a PUT with both value and notes null; the server then drops the row.
+  const removing = params.value === null;
+
+  // The row key does not include notes, and a blind value update with notes:null
+  // would erase the existing source note. Preserve it unless notes were given.
+  let notes = params.notes ?? null;
+  if (!removing && params.notes === undefined) {
+    const character = await client.get<DdbCharacter>(
+      ENDPOINTS.character.get(params.characterId),
+      `character:${params.characterId}`,
+      60_000
+    );
+    const existing = (character.characterValues ?? []).find(
+      (row) =>
+        row.typeId === definition.typeId &&
+        String(row.valueId ?? "") === String(valueId ?? "") &&
+        String(row.valueTypeId ?? "") === String(valueTypeId ?? "")
+    );
+    notes = existing?.notes ?? null;
+  }
+
+  const body = {
+    characterId: params.characterId,
+    typeId: definition.typeId,
+    value: removing ? null : params.value,
+    notes: removing ? null : notes,
+    valueId,
+    valueTypeId,
+    contextId: null,
+    contextTypeId: null,
+    partyId: null,
+  };
+
+  await client.put(ENDPOINTS.character.setCustomValue(), body, [
+    `character:${params.characterId}`,
+  ]);
+
+  const action = removing ? "Removed" : "Set";
+  const valueText = removing ? "" : ` to ${params.value}`;
+  return {
+    content: [
+      {
+        type: "text",
+        text: `${action} ${definition.label}${targetLabel}${valueText} on character ${params.characterId}.`,
+      },
+    ],
+  };
+}
+
+interface ListCharacterCustomValuesParams {
+  characterId?: number;
+  characterName?: string;
+}
+
+export async function listCharacterCustomValues(
+  client: DdbClient,
+  params: ListCharacterCustomValuesParams
+): Promise<ToolResult> {
+  const idOrError = await resolveCharacterId(client, params);
+  if (typeof idOrError === "string") {
+    return { content: [{ type: "text", text: idOrError }] };
+  }
+
+  const character = await client.get<DdbCharacter>(
+    ENDPOINTS.character.get(idOrError),
+    `character:${idOrError}`,
+    60_000
+  );
+
+  const lines = formatCustomValueLines(character);
+
+  const abilityAdjustments: string[] = [];
+  for (const stat of character.bonusStats ?? []) {
+    if (stat.value === null || stat.value === undefined || stat.value === 0) continue;
+    const sign = stat.value >= 0 ? "+" : "";
+    abilityAdjustments.push(
+      `  - ${ABILITY_NAMES[stat.id - 1] ?? `stat ${stat.id}`} bonus: ${sign}${stat.value}`
+    );
+  }
+  for (const stat of character.overrideStats ?? []) {
+    if (stat.value === null || stat.value === undefined) continue;
+    abilityAdjustments.push(
+      `  - ${ABILITY_NAMES[stat.id - 1] ?? `stat ${stat.id}`} override: ${stat.value}`
+    );
+  }
+
+  const sections = [
+    `Custom values for ${character.name}:`,
+    lines.length > 0 ? lines.join("\n") : "  (none)",
+  ];
+
+  if (abilityAdjustments.length > 0) {
+    sections.push(
+      "Ability score adjustments (use set_ability_score; not character values):",
+      abilityAdjustments.join("\n")
+    );
+  }
+
+  return { content: [{ type: "text", text: sections.join("\n") }] };
 }
 
 interface UpdateCharacterNameParams {

@@ -8,7 +8,7 @@ import {
   calculateMaxHp,
   calculateCurrentHp,
 } from "../../src/utils/character-calculations.js";
-import type { DdbCharacter, DdbModifier } from "../../src/types/character.js";
+import type { DdbCharacter, DdbCharacterValue, DdbInventoryItem, DdbModifier } from "../../src/types/character.js";
 import bearbug from "../fixtures/bearbug-character.json";
 
 describe("computeFinalAbilityScore", () => {
@@ -816,6 +816,156 @@ describe("Bearbug fixture", () => {
     expect(calculateAc(char)).toBe(19);
     expect(calculateMaxHp(char)).toBe(99);
     expect(calculateCurrentHp(char)).toBe(55);
+  });
+});
+
+describe("calculateAc with characterValues customizations", () => {
+  const baseChar: DdbCharacter = {
+    id: 1,
+    name: "Test",
+    readonlyUrl: "",
+    race: { fullName: "Human", baseRaceName: "Human", isHomebrew: false },
+    classes: [
+      {
+        id: 1,
+        definition: { name: "Fighter" },
+        level: 5,
+        isStartingClass: true,
+        subclassDefinition: null,
+        classFeatures: [],
+      },
+    ],
+    level: 5,
+    stats: [
+      { id: 1, value: 10 },
+      { id: 2, value: 14 }, // DEX +2
+      { id: 3, value: 12 },
+      { id: 4, value: 10 },
+      { id: 5, value: 10 },
+      { id: 6, value: 10 },
+    ],
+    bonusStats: [],
+    overrideStats: [],
+    modifiers: { race: [], class: [], background: [], item: [], feat: [], condition: [] },
+    inventory: [],
+    baseHitPoints: 42,
+    bonusHitPoints: null,
+    overrideHitPoints: null,
+    removedHitPoints: 0,
+    temporaryHitPoints: 0,
+    currencies: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+    background: null,
+    currentXp: 0,
+    alignmentId: null,
+    lifestyleId: null,
+    spells: { race: [], class: [], background: [], item: [], feat: [] },
+    deathSaves: { failCount: null, successCount: null, isStabilized: false },
+    traits: {
+      personalityTraits: "",
+      ideals: "",
+      bonds: "",
+      flaws: "",
+      appearance: "",
+    },
+    preferences: {},
+    configuration: {},
+    campaign: null,
+    characterValues: [],
+  } as unknown as DdbCharacter;
+
+  function customValue(
+    typeId: number,
+    value: number | string | null,
+    valueId: string | null = null
+  ): DdbCharacterValue {
+    return {
+      typeId,
+      value,
+      notes: null,
+      valueId,
+      valueTypeId: null,
+      contextId: null,
+      contextTypeId: null,
+    };
+  }
+
+  it("should add magic and misc AC bonuses", () => {
+    const char = {
+      ...baseChar,
+      characterValues: [customValue(2, 1), customValue(3, 2)],
+    };
+    expect(calculateAc(char)).toBe(15); // 10 + 2 DEX + 1 + 2
+  });
+
+  it("should apply an override AC and ignore other sources", () => {
+    const char = {
+      ...baseChar,
+      characterValues: [
+        customValue(1, 25),
+        customValue(2, 1),
+        customValue(3, 1),
+        customValue(4, 10),
+      ],
+    };
+    expect(calculateAc(char)).toBe(25);
+  });
+
+  it("should replace base armor + DEX but keep shields and bonuses", () => {
+    const shield: DdbInventoryItem = {
+      id: 1,
+      definition: {
+        name: "Shield",
+        description: "",
+        type: "",
+        rarity: "Common",
+        weight: 6,
+        cost: 10,
+        isHomebrew: false,
+        armorClass: 2,
+        armorTypeId: 4,
+        filterType: "Armor",
+      },
+      equipped: true,
+      quantity: 1,
+    };
+    const char = {
+      ...baseChar,
+      inventory: [shield],
+      characterValues: [customValue(4, 15), customValue(3, 1)],
+    };
+    expect(calculateAc(char)).toBe(18); // 15 base override + 2 shield + 1 misc
+  });
+
+  it("should keep the unarmored defense ability modifier with a base armor override", () => {
+    const char = {
+      ...baseChar,
+      classes: [
+        {
+          id: 1,
+          definition: { name: "Barbarian" },
+          level: 5,
+          isStartingClass: true,
+          subclassDefinition: null,
+          classFeatures: [],
+        },
+      ],
+      characterValues: [customValue(4, 15)],
+    };
+    // D&D Beyond replaces 10 + DEX (12) with 15 but still adds CON +1.
+    expect(calculateAc(char)).toBe(16);
+  });
+
+  it("should ignore non-AC custom values in AC", () => {
+    const char = {
+      ...baseChar,
+      characterValues: [
+        customValue(38, 5, "2"),
+        customValue(39, 5, "2"),
+        customValue(23, 5, "5"),
+        customValue(9, "note"),
+      ],
+    };
+    expect(calculateAc(char)).toBe(12);
   });
 });
 

@@ -281,6 +281,33 @@ const ARMOR_TYPE_MEDIUM = 2;
 const ARMOR_TYPE_HEAVY = 3;
 const ARMOR_TYPE_SHIELD = 4;
 
+/**
+ * AC-related `characterValues` typeIds from D&D Beyond's Customize panel.
+ * Other custom value types (saves, skills, notes, item tweaks) are surfaced by
+ * the custom-value tools but deliberately not applied to derived calculations.
+ */
+export const AC_CUSTOM_VALUE_TYPES = {
+  override: 1,
+  magicBonus: 2,
+  miscBonus: 3,
+  baseArmorOverride: 4,
+} as const;
+
+function customValueNumber(value: number | string | null): number | null {
+  if (value === null || value === "") return null;
+  const numeric = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function getCustomValue(char: DdbCharacter, typeId: number): number | null {
+  for (const row of char.characterValues ?? []) {
+    if (row.typeId !== typeId) continue;
+    const value = customValueNumber(row.value);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
 export function calculateAc(char: DdbCharacter): number {
   const dexMod = abilityModifier(
     computeFinalAbilityScore(
@@ -354,6 +381,7 @@ export function calculateAc(char: DdbCharacter): number {
   }
 
   let finalAc: number;
+  let unarmoredDefenseBonus = 0;
   if (bestArmorAc !== null) {
     finalAc = bestArmorAc;
   } else {
@@ -364,12 +392,26 @@ export function calculateAc(char: DdbCharacter): number {
     const isMonk = char.classes.some((cls) => cls.definition.name === "Monk");
 
     if (isBarbarian) {
-      finalAc = 10 + dexMod + conMod;
+      unarmoredDefenseBonus = conMod;
+      finalAc = 10 + dexMod + unarmoredDefenseBonus;
     } else if (isMonk) {
-      finalAc = 10 + dexMod + wisMod;
+      unarmoredDefenseBonus = wisMod;
+      finalAc = 10 + dexMod + unarmoredDefenseBonus;
     } else {
       finalAc = 10 + dexMod;
     }
+  }
+
+  // "Override Base Armor + DEX" replaces the armor + DEX part of the
+  // calculation. Shields and other documented bonuses still apply, and so
+  // does the extra ability modifier from unarmored defense (a live character
+  // showed 15 + CON + other bonuses, not 15 + other bonuses).
+  const baseArmorOverride = getCustomValue(
+    char,
+    AC_CUSTOM_VALUE_TYPES.baseArmorOverride
+  );
+  if (baseArmorOverride !== null) {
+    finalAc = baseArmorOverride + unarmoredDefenseBonus;
   }
 
   finalAc += shieldAc;
@@ -382,6 +424,16 @@ export function calculateAc(char: DdbCharacter): number {
     armorItemBonuses +
     sumModifierBonuses(char.modifiers, "armored-armor-class", char.inventory) +
     sumModifierBonuses(char.modifiers, "unarmored-armor-class", char.inventory);
+
+  // Additional magic/misc bonuses from the sheet's Customize panel.
+  finalAc += getCustomValue(char, AC_CUSTOM_VALUE_TYPES.magicBonus) ?? 0;
+  finalAc += getCustomValue(char, AC_CUSTOM_VALUE_TYPES.miscBonus) ?? 0;
+
+  // "Override AC" sets the displayed AC outright, ignoring all other sources.
+  const acOverride = getCustomValue(char, AC_CUSTOM_VALUE_TYPES.override);
+  if (acOverride !== null) {
+    return acOverride;
+  }
 
   return finalAc;
 }

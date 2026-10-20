@@ -79,6 +79,17 @@ After adding the configuration, restart Claude Desktop.
 - `get_condition` — Condition rules
 - `search_classes` — Class/subclass info
 
+### Homebrew
+- `list_homebrew_creations` — Your homebrew creations with type, ID, and published status
+- `get_homebrew_magic_item` — One homebrew magic item with description, modifiers, conditions, and spells
+- `list_homebrew_magic_item_modifiers` — A magic item's modifiers with their IDs and values
+- `add_homebrew_magic_item_modifier` — Add a modifier to a private magic item (names or IDs)
+- `edit_homebrew_magic_item_modifier` — Edit a modifier, preserving fields you do not pass
+- `remove_homebrew_magic_item_modifier` — Destructively remove a modifier
+- `create_homebrew_magic_item` — Create an item from scratch or from a template
+- `update_homebrew_magic_item` — Update basic fields, preserving fields you do not pass
+- `delete_homebrew_magic_item` — Destructively delete an item (soft delete on D&D Beyond)
+
 ### Utility
 - `setup_auth` — Re-run login flow
 - `check_auth` — Verify session is valid

@@ -38,6 +38,13 @@ export class TtlCache<T> {
     this.entries.delete(key);
   }
 
+  /** Removes every entry whose key starts with the given prefix. */
+  invalidatePrefix(prefix: string): void {
+    for (const key of this.entries.keys()) {
+      if (key.startsWith(prefix)) this.entries.delete(key);
+    }
+  }
+
   clear(): void {
     this.entries.clear();
   }

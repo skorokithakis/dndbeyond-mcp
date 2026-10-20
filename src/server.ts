@@ -35,6 +35,9 @@ import {
   removeCondition,
   setSpecies,
   setAbilityScore,
+  setCharacterCustomValue,
+  listCharacterCustomValues,
+  CUSTOM_VALUE_TYPE_NAMES,
   updateCharacterName,
   setClassLevel,
   setAbilityScoreType,
@@ -59,6 +62,18 @@ import {
   searchClassFeatures,
   searchRacialTraits,
 } from "./tools/reference.js";
+import {
+  addHomebrewMagicItemModifier,
+  createHomebrewMagicItem,
+  deleteHomebrewMagicItem,
+  editHomebrewMagicItemModifier,
+  getHomebrewMagicItem,
+  listHomebrewCreations,
+  listHomebrewMagicItemModifiers,
+  removeHomebrewMagicItemModifier,
+  updateHomebrewMagicItem,
+} from "./tools/homebrew.js";
+import { getWwwClient } from "./api/www.js";
 
 export async function startServer(): Promise<void> {
   // Initialize cache instance
@@ -70,6 +85,9 @@ export async function startServer(): Promise<void> {
 
   // Initialize D&D Beyond API client
   const client = new DdbClient(cache, circuitBreaker, rateLimiter);
+
+  // www.dndbeyond.com HTML/form flows share the client's rate limiter.
+  const www = getWwwClient(client.rateLimiter);
 
   // Create MCP server
   const server = new McpServer({
@@ -546,6 +564,61 @@ export async function startServer(): Promise<void> {
   );
 
   server.tool(
+    "set_character_custom_value",
+    "Set or remove a character sheet Customize value (stored in characterValues). valueType names the field: ac_override, ac_base_armor_override, ac_magic_bonus, ac_misc_bonus, saving_throw_override, saving_throw_magic_bonus, saving_throw_misc_bonus, skill_override, skill_magic_bonus, skill_misc_bonus. AC types are applied to derived AC; saving throw and skill values are stored and listed but not applied to derived stats. saving_throw_* types require ability (STR, DEX, CON, INT, WIS, CHA); skill_* types require skill (e.g. 'Stealth'). Set value to null to remove the row (notes are cleared too). Writes invalidate the character cache.",
+    {
+      characterId: z.coerce.number().describe("The character ID"),
+      valueType: z
+        .enum(CUSTOM_VALUE_TYPE_NAMES)
+        .describe("The Customize field to set or remove"),
+      value: z
+        .number()
+        .nullable()
+        .describe("New numeric value; null removes the custom value row"),
+      ability: z
+        .enum(["STR", "DEX", "CON", "INT", "WIS", "CHA"])
+        .optional()
+        .describe("Required for saving_throw_* types: the saving throw's ability"),
+      skill: z
+        .string()
+        .optional()
+        .describe(
+          "Required for skill_* types: skill name (Athletics, Acrobatics, Sleight of Hand, Stealth, Arcana, History, Investigation, Nature, Religion, Animal Handling, Insight, Medicine, Perception, Survival, Deception, Intimidation, Performance, Persuasion)"
+        ),
+      notes: z
+        .string()
+        .optional()
+        .describe("Optional source notes; omit to keep existing notes"),
+    },
+    async (params) =>
+      setCharacterCustomValue(client, {
+        characterId: params.characterId,
+        valueType: params.valueType,
+        value: params.value,
+        ability: params.ability,
+        skill: params.skill,
+        notes: params.notes,
+      })
+  );
+
+  server.tool(
+    "list_character_custom_values",
+    "List a character's sheet Customize values (characterValues): AC overrides and bonuses (applied to derived AC), saving throw and skill customizations (listed but not applied to derived stats), other custom rows, and ability score bonus/override adjustments (set with set_ability_score).",
+    {
+      characterId: z.coerce.number().optional().describe("The character ID"),
+      characterName: z
+        .string()
+        .optional()
+        .describe("The character name (case-insensitive search)"),
+    },
+    async (params) =>
+      listCharacterCustomValues(client, {
+        characterId: params.characterId,
+        characterName: params.characterName,
+      })
+  );
+
+  server.tool(
     "update_character_name",
     "Set or change a character's name",
     {
@@ -788,6 +861,318 @@ export async function startServer(): Promise<void> {
       getItem(client, {
         itemName: params.itemName,
       })
+  );
+
+  // Register homebrew tools
+  server.tool(
+    "list_homebrew_creations",
+    "List your homebrew creations on D&D Beyond with their type, entity ID, and published status. Reads the My Creations page. By default lists private and published creations; use status 'deleted' or 'all' to include soft-deleted items.",
+    {
+      status: z
+        .enum(["all", "private", "published", "deleted"])
+        .optional()
+        .describe("Filter by status (default: all)"),
+      type: z
+        .string()
+        .optional()
+        .describe(
+          "Filter by creation type, e.g. 'magic-items', 'feats', 'spells', 'monsters', 'backgrounds'",
+        ),
+    },
+    async (params) =>
+      listHomebrewCreations(www, {
+        status: params.status,
+        type: params.type,
+      })
+  );
+
+  server.tool(
+    "get_homebrew_magic_item",
+    "Read one homebrew magic item in full: basic info, description, modifiers, conditions, and spells. Basic info/modifiers come from character-service game-data/items, which is eventually consistent — a recently created or edited item may be missing or stale for a few minutes. Conditions and spells are read from the item editor page. Use list_homebrew_creations to get item IDs.",
+    {
+      itemId: z.coerce.number().describe("The homebrew magic item ID"),
+    },
+    async (params) =>
+      getHomebrewMagicItem(
+        client,
+        { itemId: params.itemId },
+        www,
+      )
+  );
+
+  server.tool(
+    "list_homebrew_magic_item_modifiers",
+    "List the modifiers on one homebrew magic item, including each modifier's ID and values. Reads the item editor page, which is authoritative and not affected by game-data replication lag. Use the returned IDs with edit_homebrew_magic_item_modifier and remove_homebrew_magic_item_modifier.",
+    {
+      itemId: z.coerce.number().describe("The homebrew magic item ID"),
+    },
+    async (params) =>
+      listHomebrewMagicItemModifiers(www, { itemId: params.itemId })
+  );
+
+  server.tool(
+    "add_homebrew_magic_item_modifier",
+    "Add a modifier to a private homebrew magic item. Accepts modifier type and subtype names (for example 'Bonus' and 'Armor Class') or numeric IDs from D&D Beyond's modifier form. Modifiers are separate entities, so the item does not need to be saved again. Published items are refused; unpublish first. Writes invalidate cached character data.",
+    {
+      itemId: z.coerce.number().describe("The homebrew magic item ID"),
+      type: z
+        .union([z.string(), z.number()])
+        .describe("Modifier type name or ID, e.g. 'Bonus' or 1"),
+      subtype: z
+        .union([z.string(), z.number()])
+        .describe("Modifier subtype name or ID, e.g. 'Armor Class' or 1"),
+      fixedValue: z.coerce
+        .number()
+        .optional()
+        .describe("Numeric value for the modifier, e.g. 1 for a +1 bonus"),
+      diceCount: z.coerce
+        .number()
+        .optional()
+        .describe("Number of dice, e.g. 2 for 2d6"),
+      dieType: z
+        .union([z.string(), z.number()])
+        .optional()
+        .describe("Die type: d4, d6, d8, d10, d12, d20 (or 4, 6, 8, 10, 12, 20)"),
+      abilityScore: z
+        .union([z.string(), z.number()])
+        .optional()
+        .describe("Ability score for ability-score modifiers: STR, DEX, CON, INT, WIS, CHA (or 1-6)"),
+      details: z
+        .string()
+        .optional()
+        .describe("Free-text details/restriction (empty or 2-512 characters)"),
+      requiresAttunement: z
+        .boolean()
+        .optional()
+        .describe("Whether the modifier requires attunement"),
+    },
+    async (params) =>
+      addHomebrewMagicItemModifier(client, {
+        itemId: params.itemId,
+        type: params.type,
+        subtype: params.subtype,
+        fixedValue: params.fixedValue,
+        diceCount: params.diceCount,
+        dieType: params.dieType,
+        abilityScore: params.abilityScore,
+        details: params.details,
+        requiresAttunement: params.requiresAttunement,
+      }, www)
+  );
+
+  server.tool(
+    "edit_homebrew_magic_item_modifier",
+    "Edit an existing modifier on a private homebrew magic item. Loads the current modifier form first, so fields you do not pass (duration, additional bonus type, and so on) are preserved. Accepts type/subtype names or numeric IDs. Published items are refused; unpublish first. Writes invalidate cached character data.",
+    {
+      itemId: z.coerce.number().describe("The homebrew magic item ID"),
+      modifierId: z.coerce.number().describe("The modifier ID (see list_homebrew_magic_item_modifiers)"),
+      type: z
+        .union([z.string(), z.number()])
+        .optional()
+        .describe("New modifier type name or ID (omit to keep the current type)"),
+      subtype: z
+        .union([z.string(), z.number()])
+        .optional()
+        .describe("New modifier subtype name or ID (omit to keep the current subtype)"),
+      fixedValue: z.coerce
+        .number()
+        .optional()
+        .describe("Numeric value for the modifier (omit to keep the current value)"),
+      diceCount: z.coerce
+        .number()
+        .optional()
+        .describe("Number of dice (omit to keep the current value)"),
+      dieType: z
+        .union([z.string(), z.number()])
+        .optional()
+        .describe("Die type: d4, d6, d8, d10, d12, d20 (or 4, 6, 8, 10, 12, 20)"),
+      abilityScore: z
+        .union([z.string(), z.number()])
+        .optional()
+        .describe("Ability score: STR, DEX, CON, INT, WIS, CHA (or 1-6)"),
+      details: z
+        .string()
+        .optional()
+        .describe("Free-text details/restriction (empty or 2-512 characters; empty clears it)"),
+      requiresAttunement: z
+        .boolean()
+        .optional()
+        .describe("Whether the modifier requires attunement"),
+    },
+    async (params) =>
+      editHomebrewMagicItemModifier(client, {
+        itemId: params.itemId,
+        modifierId: params.modifierId,
+        type: params.type,
+        subtype: params.subtype,
+        fixedValue: params.fixedValue,
+        diceCount: params.diceCount,
+        dieType: params.dieType,
+        abilityScore: params.abilityScore,
+        details: params.details,
+        requiresAttunement: params.requiresAttunement,
+      }, www)
+  );
+
+  server.tool(
+    "remove_homebrew_magic_item_modifier",
+    "DESTRUCTIVE: permanently remove a modifier from a private homebrew magic item. This cannot be undone through this server. Use list_homebrew_magic_item_modifiers to confirm the modifier ID first. Published items are refused; unpublish first. Writes invalidate cached character data.",
+    {
+      itemId: z.coerce.number().describe("The homebrew magic item ID"),
+      modifierId: z.coerce.number().describe("The modifier ID (see list_homebrew_magic_item_modifiers)"),
+    },
+    async (params) =>
+      removeHomebrewMagicItemModifier(client, {
+        itemId: params.itemId,
+        modifierId: params.modifierId,
+      }, www)
+  );
+
+  // Register homebrew item create/update/delete tools
+  const createHomebrewMagicItemInput = z
+    .object({
+      name: z
+        .string()
+        .optional()
+        .describe(
+          "Item name. Required when creating from scratch; optional for template copies (they default to COPY_OF_<template>)",
+        ),
+      templateItemId: z
+        .union([z.string(), z.number()])
+        .optional()
+        .describe(
+          "Create from an existing magic item instead of from scratch: template definition ID or exact template name, e.g. 'Amulet of Health'",
+        ),
+      description: z
+        .string()
+        .optional()
+        .describe(
+          "Item description as HTML. Plain text without tags is wrapped in <p> tags. Required when creating from scratch; optional for template copies",
+        ),
+      rarity: z
+        .union([z.string(), z.number()])
+        .optional()
+        .describe(
+          "Rarity name or ID: Common, Uncommon, Rare, Very Rare, Legendary, Artifact, Varies, Unknown Rarity (IDs 1-5, 7, 9, 10)",
+        ),
+      type: z
+        .union([z.string(), z.number()])
+        .optional()
+        .describe(
+          "Magic item type name or ID: Wondrous Item, Ring, Potion, Rod, Scroll, Staff, Wand (IDs 10, 4, 3, 5, 6, 7, 8)",
+        ),
+      weight: z.coerce
+        .number()
+        .optional()
+        .describe("Weight in pounds (applied with a follow-up save; the create page has no weight field)"),
+      requiresAttunement: z
+        .boolean()
+        .optional()
+        .describe("Whether the item requires attunement"),
+      attunementDescription: z
+        .string()
+        .optional()
+        .describe("Attunement condition text, if any"),
+      notes: z
+        .string()
+        .optional()
+        .describe("Private notes (applied with a follow-up save; the create page has no notes field)"),
+      version: z
+        .string()
+        .optional()
+        .describe("Version text shown on the item"),
+    })
+    .superRefine((value, ctx) => {
+      if (value.templateItemId === undefined && !value.description?.trim()) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["description"],
+          message:
+            "A description is required when creating an item from scratch; omit templateItemId only when you pass one.",
+        });
+      }
+    });
+
+  server.registerTool(
+    "create_homebrew_magic_item",
+    {
+      description:
+        "Create a private homebrew magic item from scratch, or as a copy of an existing magic item template. A description is required for scratch creates (D&D Beyond rejects them without one); template copies may omit it. Template copies are named COPY_OF_<template> by D&D Beyond unless you pass a name. Description is HTML (plain text is wrapped in <p> tags). D&D Beyond's game-data reads are eventually consistent, so the new item may take a moment to appear in other tools. Writes invalidate cached character data.",
+      inputSchema: createHomebrewMagicItemInput,
+    },
+    async (params) =>
+      createHomebrewMagicItem(client, {
+        name: params.name,
+        templateItemId: params.templateItemId,
+        description: params.description,
+        rarity: params.rarity,
+        type: params.type,
+        weight: params.weight,
+        requiresAttunement: params.requiresAttunement,
+        attunementDescription: params.attunementDescription,
+        notes: params.notes,
+        version: params.version,
+      }, www)
+  );
+
+  server.tool(
+    "update_homebrew_magic_item",
+    "Update a private homebrew magic item's name, description and other basic fields. Loads the current edit form first, so fields you do not pass are preserved. Description is HTML (plain text is wrapped in <p> tags). Published and deleted items are refused; unpublish or restore them first. Writes invalidate cached character data.",
+    {
+      itemId: z.coerce.number().describe("The homebrew magic item ID"),
+      name: z.string().optional().describe("New item name (omit to keep the current name)"),
+      description: z
+        .string()
+        .optional()
+        .describe(
+          "New description as HTML; plain text is wrapped in <p> tags (omit to keep the current description)",
+        ),
+      rarity: z
+        .union([z.string(), z.number()])
+        .optional()
+        .describe("Rarity name or ID (omit to keep the current rarity)"),
+      type: z
+        .union([z.string(), z.number()])
+        .optional()
+        .describe("Magic item type name or ID (omit to keep the current type)"),
+      weight: z.coerce
+        .number()
+        .optional()
+        .describe("Weight in pounds (omit to keep the current weight)"),
+      requiresAttunement: z
+        .boolean()
+        .optional()
+        .describe("Whether the item requires attunement"),
+      attunementDescription: z
+        .string()
+        .optional()
+        .describe("Attunement condition text (omit to keep the current text)"),
+      notes: z.string().optional().describe("Private notes (omit to keep the current notes)"),
+      version: z.string().optional().describe("Version text (omit to keep the current version)"),
+    },
+    async (params) =>
+      updateHomebrewMagicItem(client, {
+        itemId: params.itemId,
+        name: params.name,
+        description: params.description,
+        rarity: params.rarity,
+        type: params.type,
+        weight: params.weight,
+        requiresAttunement: params.requiresAttunement,
+        attunementDescription: params.attunementDescription,
+        notes: params.notes,
+        version: params.version,
+      }, www)
+  );
+
+  server.tool(
+    "delete_homebrew_magic_item",
+    "DESTRUCTIVE: delete a homebrew magic item. It disappears from your creations and from characters that use it. On D&D Beyond this is a soft delete — the item moves to the Deleted filter and can be restored on the site — but treat it as permanent: this server cannot restore it. Use list_homebrew_creations to confirm the ID first. Published and deleted items are refused. Writes invalidate cached character data.",
+    {
+      itemId: z.coerce.number().describe("The homebrew magic item ID to delete"),
+    },
+    async (params) =>
+      deleteHomebrewMagicItem(client, { itemId: params.itemId }, www)
   );
 
   // Register reference tools - feats
