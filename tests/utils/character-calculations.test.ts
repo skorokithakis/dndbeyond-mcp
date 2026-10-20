@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  computeAbilityScoreBreakdown,
   computeFinalAbilityScore,
   sumModifierBonuses,
   calculateAc,
@@ -8,6 +9,7 @@ import {
   calculateCurrentHp,
 } from "../../src/utils/character-calculations.js";
 import type { DdbCharacter, DdbModifier } from "../../src/types/character.js";
+import bearbug from "../fixtures/bearbug-character.json";
 
 describe("computeFinalAbilityScore", () => {
   const baseStats = [
@@ -133,6 +135,91 @@ describe("sumModifierBonuses", () => {
     const result = sumModifierBonuses(modifiers, "armor-class");
     expect(result).toBe(0);
   });
+
+  it("should count stacking bonuses", () => {
+    const modifiers = {
+      item: [
+        { type: "stacking-bonus", subType: "charisma-score", value: 3 } as DdbModifier,
+        { type: "bonus", subType: "charisma-score", value: 1 } as DdbModifier,
+      ],
+    };
+
+    expect(sumModifierBonuses(modifiers, "charisma-score")).toBe(4);
+  });
+
+  it("should fall back to fixedValue when value is null", () => {
+    const modifiers = {
+      item: [
+        { type: "bonus", subType: "hit-points", value: null, fixedValue: 4 } as DdbModifier,
+      ],
+    };
+
+    expect(sumModifierBonuses(modifiers, "hit-points")).toBe(4);
+  });
+});
+
+describe("computeFinalAbilityScore with sets and item state", () => {
+  const baseStats = [{ id: 2, value: 8 }];
+
+  it("should use the highest set value as a floor", () => {
+    const modifiers = {
+      item: [
+        { type: "set", subType: "dexterity-score", value: 19 } as DdbModifier,
+        { type: "set", subType: "dexterity-score", value: 17 } as DdbModifier,
+      ],
+    };
+
+    const result = computeFinalAbilityScore(baseStats, [], [], modifiers, 2);
+    expect(result).toBe(19);
+  });
+
+  it("should keep a computed score higher than the set value", () => {
+    const modifiers = {
+      race: [
+        { type: "bonus", subType: "dexterity-score", value: 12 } as DdbModifier,
+      ],
+      item: [
+        { type: "set", subType: "dexterity-score", value: 19 } as DdbModifier,
+      ],
+    };
+
+    const result = computeFinalAbilityScore(baseStats, [], [], modifiers, 2);
+    expect(result).toBe(20); // base 8 + bonus 12 = 20, above the set floor
+  });
+
+  it("should ignore set modifiers from unequipped or unattuned items", () => {
+    const modifiers = {
+      item: [
+        {
+          type: "set",
+          subType: "dexterity-score",
+          value: 19,
+          componentId: 1,
+        } as DdbModifier,
+        {
+          type: "set",
+          subType: "dexterity-score",
+          value: 20,
+          componentId: 2,
+          requiresAttunement: true,
+        } as DdbModifier,
+      ],
+    };
+    const inventory = [
+      { definition: { id: 1 }, equipped: false, isAttuned: false },
+      { definition: { id: 2 }, equipped: true, isAttuned: false },
+    ] as unknown as DdbCharacter["inventory"];
+
+    const result = computeFinalAbilityScore(
+      baseStats,
+      [],
+      [],
+      modifiers,
+      2,
+      inventory
+    );
+    expect(result).toBe(8);
+  });
 });
 
 describe("calculateAc", () => {
@@ -201,8 +288,9 @@ describe("calculateAc", () => {
           id: 1,
           definition: {
             name: "Leather Armor",
-            type: "Light Armor",
-            filterType: "Light Armor",
+            type: "",
+            filterType: "Armor",
+            armorTypeId: 1,
             armorClass: 11,
             rarity: "Common",
             weight: 10,
@@ -228,8 +316,9 @@ describe("calculateAc", () => {
           id: 1,
           definition: {
             name: "Scale Mail",
-            type: "Medium Armor",
-            filterType: "Medium Armor",
+            type: "",
+            filterType: "Armor",
+            armorTypeId: 2,
             armorClass: 14,
             rarity: "Common",
             weight: 45,
@@ -255,8 +344,9 @@ describe("calculateAc", () => {
           id: 1,
           definition: {
             name: "Chain Mail",
-            type: "Heavy Armor",
-            filterType: "Heavy Armor",
+            type: "",
+            filterType: "Armor",
+            armorTypeId: 3,
             armorClass: 16,
             rarity: "Common",
             weight: 55,
@@ -282,8 +372,9 @@ describe("calculateAc", () => {
           id: 1,
           definition: {
             name: "Shield",
-            type: "Shield",
-            filterType: "Shield",
+            type: "",
+            filterType: "Armor",
+            armorTypeId: 4,
             armorClass: 2,
             rarity: "Common",
             weight: 6,
@@ -365,6 +456,367 @@ describe("calculateAc", () => {
     const result = calculateAc(charWithAcBonus);
     expect(result).toBe(13); // 10 + 2 (DEX) + 1 (feature)
   });
+
+  it("should use the equipped body armor with the highest AC", () => {
+    const charWithTwoArmors = {
+      ...baseChar,
+      inventory: [
+        {
+          id: 1,
+          definition: {
+            name: "Leather",
+            type: "",
+            filterType: "Armor",
+            armorTypeId: 1,
+            armorClass: 11,
+          },
+          equipped: true,
+        },
+        {
+          id: 2,
+          definition: {
+            name: "Studded Leather",
+            type: "",
+            filterType: "Armor",
+            armorTypeId: 1,
+            armorClass: 12,
+          },
+          equipped: true,
+        },
+      ],
+    } as unknown as DdbCharacter;
+
+    expect(calculateAc(charWithTwoArmors)).toBe(14); // 12 + 2 (DEX)
+  });
+
+  it("should add magic armor bonus once via its armor-class modifier", () => {
+    const charWithMagicArmor = {
+      ...baseChar,
+      inventory: [
+        {
+          id: 1,
+          definition: {
+            id: 1,
+            name: "Studded Leather, +1",
+            type: "",
+            filterType: "Armor",
+            armorTypeId: 1,
+            armorClass: 12, // base AC, magic bonus is a modifier
+          },
+          equipped: true,
+        },
+      ],
+      modifiers: {
+        race: [],
+        class: [],
+        background: [],
+        item: [
+          {
+            type: "bonus",
+            subType: "armor-class",
+            value: 1,
+            componentId: 1,
+          } as DdbModifier,
+        ],
+        feat: [],
+        condition: [],
+      },
+    } as unknown as DdbCharacter;
+
+    expect(calculateAc(charWithMagicArmor)).toBe(15); // 12 + 2 (DEX) + 1 (magic)
+  });
+
+  it("should rank body armors by full AC including their magic bonuses", () => {
+    const charWithTwoMagicArmors = {
+      ...baseChar,
+      inventory: [
+        {
+          id: 1,
+          definition: {
+            id: 1,
+            name: "Plate, +1",
+            type: "",
+            filterType: "Armor",
+            armorTypeId: 3,
+            armorClass: 18,
+          },
+          equipped: true,
+        },
+        {
+          id: 2,
+          definition: {
+            id: 2,
+            name: "Chain Mail, +2",
+            type: "",
+            filterType: "Armor",
+            armorTypeId: 3,
+            armorClass: 16,
+          },
+          equipped: true,
+        },
+      ],
+      modifiers: {
+        ...baseChar.modifiers,
+        item: [
+          {
+            type: "bonus",
+            subType: "armor-class",
+            value: 1,
+            componentId: 1,
+          } as DdbModifier,
+          {
+            type: "bonus",
+            subType: "armor-class",
+            value: 2,
+            componentId: 2,
+          } as DdbModifier,
+        ],
+      },
+    } as unknown as DdbCharacter;
+
+    // Plate +1 wins (18 + 1); the chain mail's +2 is not added on top.
+    expect(calculateAc(charWithTwoMagicArmors)).toBe(19);
+  });
+
+  it("should not subtract non-item AC modifiers that share an armor's id", () => {
+    const charWithSharedIdBonus = {
+      ...baseChar,
+      inventory: [
+        {
+          id: 1,
+          definition: {
+            id: 1,
+            name: "Plate",
+            type: "",
+            filterType: "Armor",
+            armorTypeId: 3,
+            armorClass: 18,
+          },
+          equipped: true,
+        },
+        {
+          id: 2,
+          definition: {
+            id: 2,
+            name: "Chain Mail",
+            type: "",
+            filterType: "Armor",
+            armorTypeId: 3,
+            armorClass: 16,
+          },
+          equipped: true,
+        },
+      ],
+      modifiers: {
+        ...baseChar.modifiers,
+        class: [
+          {
+            type: "bonus",
+            subType: "armor-class",
+            value: 2,
+            componentId: 2, // same id as the unselected chain mail
+          } as DdbModifier,
+        ],
+      },
+    } as unknown as DdbCharacter;
+
+    // Plate (18) + the class bonus (2); the class bonus must not be cancelled
+    // out by matching the chain mail's definition id.
+    expect(calculateAc(charWithSharedIdBonus)).toBe(20);
+  });
+
+  it("should use only the best shield including its magic bonus", () => {
+    const charWithTwoMagicShields = {
+      ...baseChar,
+      inventory: [
+        {
+          id: 1,
+          definition: {
+            id: 1,
+            name: "Shield, +1",
+            type: "",
+            filterType: "Armor",
+            armorTypeId: 4,
+            armorClass: 2,
+          },
+          equipped: true,
+        },
+        {
+          id: 2,
+          definition: {
+            id: 2,
+            name: "Shield, +2",
+            type: "",
+            filterType: "Armor",
+            armorTypeId: 4,
+            armorClass: 2,
+          },
+          equipped: true,
+        },
+      ],
+      modifiers: {
+        ...baseChar.modifiers,
+        item: [
+          {
+            type: "bonus",
+            subType: "armor-class",
+            value: 1,
+            componentId: 1,
+          } as DdbModifier,
+          {
+            type: "bonus",
+            subType: "armor-class",
+            value: 2,
+            componentId: 2,
+          } as DdbModifier,
+        ],
+      },
+    } as unknown as DdbCharacter;
+
+    // 10 + 2 (DEX) + the +2 shield (2 + 2); the +1 shield is not added.
+    expect(calculateAc(charWithTwoMagicShields)).toBe(16);
+  });
+
+  it("should ignore armor-class modifiers from unequipped items", () => {
+    const charWithUnequippedBonus = {
+      ...baseChar,
+      inventory: [
+        {
+          id: 1,
+          definition: { id: 1, name: "Test Cloak" },
+          equipped: false,
+        },
+      ],
+      modifiers: {
+        race: [],
+        class: [],
+        background: [],
+        item: [
+          {
+            type: "bonus",
+            subType: "armor-class",
+            value: 2,
+            componentId: 1,
+          } as DdbModifier,
+        ],
+        feat: [],
+        condition: [],
+      },
+    } as unknown as DdbCharacter;
+
+    expect(calculateAc(charWithUnequippedBonus)).toBe(12); // 10 + 2 (DEX)
+  });
+});
+
+describe("Bearbug fixture", () => {
+  const char = bearbug as unknown as DdbCharacter;
+
+  it("should match D&D Beyond ability scores", () => {
+    const scores = [1, 2, 3, 4, 5, 6].map((id) =>
+      computeFinalAbilityScore(
+        char.stats,
+        char.bonusStats,
+        char.overrideStats,
+        char.modifiers,
+        id,
+        char.inventory
+      )
+    );
+    expect(scores).toEqual([16, 19, 16, 16, 9, 20]);
+  });
+
+  it("should attribute ability bonuses to their sources", () => {
+    const cloak =
+      "Dazzling Cloak of Stealth and Beauty and Other Amazing Attributes That Are Excellent";
+
+    const con = computeAbilityScoreBreakdown(
+      char.stats,
+      char.bonusStats,
+      char.overrideStats,
+      char.modifiers,
+      3,
+      char.inventory
+    );
+    expect(con.total).toBe(16);
+    expect(con.contributions).toEqual([{ source: cloak, value: 6 }]);
+    expect(con.set).toBeNull();
+
+    const dex = computeAbilityScoreBreakdown(
+      char.stats,
+      char.bonusStats,
+      char.overrideStats,
+      char.modifiers,
+      2,
+      char.inventory
+    );
+    expect(dex.total).toBe(19);
+    expect(dex.contributions).toEqual([{ source: "race", value: 1 }]);
+    expect(dex.set).toEqual({ value: 19, source: "Gloves of Dexterity" });
+
+    const cha = computeAbilityScoreBreakdown(
+      char.stats,
+      char.bonusStats,
+      char.overrideStats,
+      char.modifiers,
+      6,
+      char.inventory
+    );
+    expect(cha.total).toBe(20);
+    expect(cha.contributions).toEqual([
+      { source: "class", value: 2 },
+      { source: cloak, value: 3 },
+    ]);
+  });
+
+  it("should omit a set modifier that does not set the total", () => {
+    const baseStats = [{ id: 2, value: 8 }];
+    const modifiers = {
+      race: [
+        { type: "bonus", subType: "dexterity-score", value: 12 } as DdbModifier,
+      ],
+      item: [
+        { type: "set", subType: "dexterity-score", value: 19 } as DdbModifier,
+      ],
+    };
+
+    const breakdown = computeAbilityScoreBreakdown(
+      baseStats,
+      [],
+      [],
+      modifiers,
+      2
+    );
+    expect(breakdown.total).toBe(20);
+    expect(breakdown.set).toBeNull();
+  });
+
+  it("should describe overrides and bonus stats", () => {
+    const overrideBreakdown = computeAbilityScoreBreakdown(
+      [{ id: 1, value: 12 }],
+      [],
+      [{ id: 1, value: 20 }],
+      {},
+      1
+    );
+    expect(overrideBreakdown.total).toBe(20);
+    expect(overrideBreakdown.override).toBe(20);
+
+    const bonusBreakdown = computeAbilityScoreBreakdown(
+      [{ id: 1, value: 12 }],
+      [{ id: 1, value: 2 }],
+      [],
+      {},
+      1
+    );
+    expect(bonusBreakdown.total).toBe(14);
+    expect(bonusBreakdown.bonus).toBe(2);
+  });
+
+  it("should match D&D Beyond AC and hit points", () => {
+    expect(calculateAc(char)).toBe(19);
+    expect(calculateMaxHp(char)).toBe(99);
+    expect(calculateCurrentHp(char)).toBe(55);
+  });
 });
 
 describe("computeLevel", () => {
@@ -393,19 +845,37 @@ describe("computeLevel", () => {
 });
 
 describe("calculateMaxHp", () => {
+  const hpChar = {
+    classes: [{ level: 5 }, { level: 3 }],
+    stats: [
+      { id: 1, value: 10 },
+      { id: 2, value: 10 },
+      { id: 3, value: 14 }, // CON +2
+      { id: 4, value: 10 },
+      { id: 5, value: 10 },
+      { id: 6, value: 10 },
+    ],
+    bonusStats: [],
+    overrideStats: [],
+    modifiers: { race: [], class: [], background: [], item: [], feat: [], condition: [] },
+    inventory: [],
+  };
+
   it("should return base + bonus when no override", () => {
     const char = {
+      ...hpChar,
       baseHitPoints: 42,
       bonusHitPoints: 5,
       overrideHitPoints: null,
     } as unknown as DdbCharacter;
 
     const result = calculateMaxHp(char);
-    expect(result).toBe(47);
+    expect(result).toBe(63); // 42 + 5 + 2 (CON) * 8 (level)
   });
 
   it("should return override when present", () => {
     const char = {
+      ...hpChar,
       baseHitPoints: 42,
       bonusHitPoints: 5,
       overrideHitPoints: 100,
@@ -417,13 +887,66 @@ describe("calculateMaxHp", () => {
 
   it("should handle null bonus", () => {
     const char = {
+      ...hpChar,
       baseHitPoints: 42,
       bonusHitPoints: null,
       overrideHitPoints: null,
     } as unknown as DdbCharacter;
 
     const result = calculateMaxHp(char);
-    expect(result).toBe(42);
+    expect(result).toBe(58); // 42 + 2 (CON) * 8 (level)
+  });
+
+  it("should add hit-points-per-level modifiers per level", () => {
+    const char = {
+      ...hpChar,
+      baseHitPoints: 42,
+      bonusHitPoints: null,
+      overrideHitPoints: null,
+      modifiers: {
+        ...hpChar.modifiers,
+        feat: [
+          {
+            type: "bonus",
+            subType: "hit-points-per-level",
+            value: 2,
+            componentId: 1,
+          } as DdbModifier,
+        ],
+      },
+    } as unknown as DdbCharacter;
+
+    const result = calculateMaxHp(char);
+    expect(result).toBe(74); // 42 + 16 (CON) + 16 (Tough)
+  });
+
+  it("should ignore hit-points-per-level modifiers from unequipped items", () => {
+    const char = {
+      ...hpChar,
+      baseHitPoints: 42,
+      bonusHitPoints: null,
+      overrideHitPoints: null,
+      inventory: [
+        {
+          equipped: false,
+          definition: { id: 99, name: "Test Charm" },
+        },
+      ],
+      modifiers: {
+        ...hpChar.modifiers,
+        item: [
+          {
+            type: "stacking-bonus",
+            subType: "hit-points-per-level",
+            value: 2,
+            componentId: 99,
+          } as DdbModifier,
+        ],
+      },
+    } as unknown as DdbCharacter;
+
+    const result = calculateMaxHp(char);
+    expect(result).toBe(58); // Item not equipped
   });
 });
 
@@ -434,6 +957,12 @@ describe("calculateCurrentHp", () => {
       bonusHitPoints: 5,
       overrideHitPoints: null,
       removedHitPoints: 10,
+      classes: [],
+      stats: [],
+      bonusStats: [],
+      overrideStats: [],
+      modifiers: {},
+      inventory: [],
     } as unknown as DdbCharacter;
 
     const result = calculateCurrentHp(char);
@@ -446,6 +975,12 @@ describe("calculateCurrentHp", () => {
       bonusHitPoints: null,
       overrideHitPoints: null,
       removedHitPoints: 0,
+      classes: [],
+      stats: [],
+      bonusStats: [],
+      overrideStats: [],
+      modifiers: {},
+      inventory: [],
     } as unknown as DdbCharacter;
 
     const result = calculateCurrentHp(char);

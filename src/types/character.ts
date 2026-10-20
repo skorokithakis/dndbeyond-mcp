@@ -127,6 +127,7 @@ export interface DdbSpell {
 export interface DdbInventoryItem {
   id: number;
   definition: {
+    id?: number;
     name: string;
     description: string;
     type: string;
@@ -135,9 +136,11 @@ export interface DdbInventoryItem {
     cost: number | null;
     isHomebrew: boolean;
     armorClass?: number | null;
+    armorTypeId?: number | null; // 1 light, 2 medium, 3 heavy, 4 shield
     filterType?: string;
   };
   equipped: boolean;
+  isAttuned?: boolean;
   quantity: number;
 }
 
@@ -176,6 +179,8 @@ export interface DdbModifier {
   type: string;
   subType: string;
   value: number | null;
+  fixedValue?: number | null;
+  requiresAttunement?: boolean;
   friendlyTypeName: string;
   friendlySubtypeName: string;
   componentId: number;

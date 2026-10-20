@@ -4,16 +4,8 @@ import { ENDPOINTS } from "../api/endpoints.js";
 import type { DdbCharacter } from "../types/character.js";
 import type { DdbCampaign, DdbCampaignCharacter2 } from "../types/api.js";
 import { HttpError } from "../resilience/index.js";
-import { ABILITY_NAMES, calculateAbilityModifier, computeFinalAbilityScore, computeLevel, calculateMaxHp, calculateCurrentHp, calculateAc } from "../utils/character-calculations.js";
-
-function formatAbilityScores(char: DdbCharacter): string {
-  return ABILITY_NAMES.map((name, idx) => {
-    const id = idx + 1;
-    const score = computeFinalAbilityScore(char.stats, char.bonusStats, char.overrideStats, char.modifiers, id);
-    const modifier = calculateAbilityModifier(score);
-    return `${name}: ${score} (${modifier})`;
-  }).join(" | ");
-}
+import { computeLevel, calculateMaxHp, calculateCurrentHp, calculateAc } from "../utils/character-calculations.js";
+import { formatAbilityScores } from "../utils/character-format.js";
 
 function formatClasses(char: DdbCharacter): string {
   const classes = char.classes

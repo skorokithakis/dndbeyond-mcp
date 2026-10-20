@@ -19,7 +19,8 @@ import type {
   DdbUserCharacterListItem,
 } from "../types/api.js";
 import { fuzzyMatch, levenshteinDistance } from "../utils/fuzzy-match.js";
-import { ABILITY_NAMES, ABILITY_SUBTYPE_MAP, calculateAbilityModifier, sumModifierBonuses, computeFinalAbilityScore, computeLevel, calculateMaxHp, calculateCurrentHp, calculateAc } from "../utils/character-calculations.js";
+import { ABILITY_NAMES, ABILITY_SUBTYPE_MAP, sumModifierBonuses, computeFinalAbilityScore, computeLevel, calculateMaxHp, calculateCurrentHp, calculateAc } from "../utils/character-calculations.js";
+import { formatAbilityScores } from "../utils/character-format.js";
 
 interface GetCharacterParams {
   characterId?: number;
@@ -34,15 +35,6 @@ interface GetDefinitionParams {
 }
 
 type ToolResult = { content: Array<{ type: "text"; text: string }> };
-
-function formatAbilityScores(char: DdbCharacter): string {
-  return ABILITY_NAMES.map((name, idx) => {
-    const id = idx + 1;
-    const score = computeFinalAbilityScore(char.stats, char.bonusStats, char.overrideStats, char.modifiers, id);
-    const modifier = calculateAbilityModifier(score);
-    return `${name}: ${score} (${modifier})`;
-  }).join(" | ");
-}
 
 function formatClasses(char: DdbCharacter): string {
   const classes = char.classes
@@ -157,7 +149,7 @@ function calculateProficiencyBonus(level: number): number {
 }
 
 function getAbilityScoreNumeric(char: DdbCharacter, id: number): number {
-  return computeFinalAbilityScore(char.stats, char.bonusStats, char.overrideStats, char.modifiers, id);
+  return computeFinalAbilityScore(char.stats, char.bonusStats, char.overrideStats, char.modifiers, id, char.inventory);
 }
 
 function getAbilityModNumeric(char: DdbCharacter, id: number): number {
@@ -442,9 +434,9 @@ function formatSpeed(char: DdbCharacter): string {
   let baseSpeed = 30;
 
   // Check modifiers for speed bonuses
-  let speedBonus = sumModifierBonuses(char.modifiers, "speed");
-  speedBonus += sumModifierBonuses(char.modifiers, "unarmored-movement");
-  speedBonus += sumModifierBonuses(char.modifiers, "innate-speed-walking");
+  let speedBonus = sumModifierBonuses(char.modifiers, "speed", char.inventory);
+  speedBonus += sumModifierBonuses(char.modifiers, "unarmored-movement", char.inventory);
+  speedBonus += sumModifierBonuses(char.modifiers, "innate-speed-walking", char.inventory);
 
   const totalSpeed = baseSpeed + speedBonus;
   return `Speed: ${totalSpeed} ft`;

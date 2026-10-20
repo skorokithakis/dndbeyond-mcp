@@ -1,0 +1,250 @@
+{
+  "stats": [
+    {
+      "id": 1,
+      "value": 14
+    },
+    {
+      "id": 2,
+      "value": 8
+    },
+    {
+      "id": 3,
+      "value": 10
+    },
+    {
+      "id": 4,
+      "value": 15
+    },
+    {
+      "id": 5,
+      "value": 8
+    },
+    {
+      "id": 6,
+      "value": 15
+    }
+  ],
+  "bonusStats": [
+    {
+      "id": 1,
+      "value": null
+    },
+    {
+      "id": 2,
+      "value": null
+    },
+    {
+      "id": 3,
+      "value": null
+    },
+    {
+      "id": 4,
+      "value": null
+    },
+    {
+      "id": 5,
+      "value": null
+    },
+    {
+      "id": 6,
+      "value": null
+    }
+  ],
+  "overrideStats": [
+    {
+      "id": 1,
+      "value": null
+    },
+    {
+      "id": 2,
+      "value": null
+    },
+    {
+      "id": 3,
+      "value": null
+    },
+    {
+      "id": 4,
+      "value": null
+    },
+    {
+      "id": 5,
+      "value": null
+    },
+    {
+      "id": 6,
+      "value": null
+    }
+  ],
+  "baseHitPoints": 63,
+  "bonusHitPoints": null,
+  "overrideHitPoints": null,
+  "removedHitPoints": 44,
+  "temporaryHitPoints": 0,
+  "classes": [
+    {
+      "level": 12,
+      "isStartingClass": true,
+      "definition": {
+        "name": "Rogue"
+      },
+      "subclassDefinition": null,
+      "classFeatures": []
+    }
+  ],
+  "inventory": [
+    {
+      "equipped": true,
+      "isAttuned": false,
+      "definition": {
+        "id": 5096,
+        "name": "Studded Leather, +1",
+        "filterType": "Armor",
+        "armorTypeId": 1,
+        "armorClass": 12
+      }
+    },
+    {
+      "equipped": true,
+      "isAttuned": false,
+      "definition": {
+        "id": 4910078,
+        "name": "Dazzling Cloak of Stealth and Beauty and Other Amazing Attributes That Are Excellent",
+        "filterType": "Wondrous item",
+        "armorTypeId": null,
+        "armorClass": null
+      }
+    },
+    {
+      "equipped": true,
+      "isAttuned": true,
+      "definition": {
+        "id": 8549968,
+        "name": "Gloves of Dexterity",
+        "filterType": "Wondrous item",
+        "armorTypeId": null,
+        "armorClass": null
+      }
+    },
+    {
+      "equipped": true,
+      "isAttuned": false,
+      "definition": {
+        "id": 10,
+        "name": "Leather",
+        "filterType": "Armor",
+        "armorTypeId": 1,
+        "armorClass": 11
+      }
+    },
+    {
+      "equipped": false,
+      "isAttuned": false,
+      "definition": {
+        "id": 5133,
+        "name": "Potion of Healing (Greater)",
+        "filterType": "Potion",
+        "armorTypeId": null,
+        "armorClass": null
+      }
+    }
+  ],
+  "modifiers": {
+    "race": [
+      {
+        "type": "bonus",
+        "subType": "strength-score",
+        "value": 2,
+        "componentId": 225,
+        "fixedValue": 2
+      },
+      {
+        "type": "bonus",
+        "subType": "dexterity-score",
+        "value": 1,
+        "componentId": 225,
+        "fixedValue": 1
+      }
+    ],
+    "class": [
+      {
+        "type": "bonus",
+        "subType": "charisma-score",
+        "value": 1,
+        "componentId": 314,
+        "fixedValue": 1
+      },
+      {
+        "type": "bonus",
+        "subType": "charisma-score",
+        "value": 1,
+        "componentId": 314,
+        "fixedValue": 1
+      }
+    ],
+    "background": [],
+    "item": [
+      {
+        "type": "bonus",
+        "subType": "armor-class",
+        "value": 1,
+        "componentId": 5096,
+        "fixedValue": 1
+      },
+      {
+        "type": "bonus",
+        "subType": "hit-points",
+        "value": null,
+        "componentId": 5133,
+        "fixedValue": 4
+      },
+      {
+        "type": "bonus",
+        "subType": "armor-class",
+        "value": 2,
+        "componentId": 4910078,
+        "fixedValue": 2
+      },
+      {
+        "type": "stacking-bonus",
+        "subType": "constitution-score",
+        "value": 6,
+        "componentId": 4910078,
+        "fixedValue": 6
+      },
+      {
+        "type": "stacking-bonus",
+        "subType": "charisma-score",
+        "value": 3,
+        "componentId": 4910078,
+        "fixedValue": 3
+      },
+      {
+        "type": "set",
+        "subType": "dexterity-score",
+        "value": 19,
+        "componentId": 8549968,
+        "fixedValue": 19,
+        "requiresAttunement": true
+      }
+    ],
+    "feat": [
+      {
+        "type": "bonus",
+        "subType": "intelligence-score",
+        "value": 1,
+        "componentId": 1874753,
+        "fixedValue": 1
+      },
+      {
+        "type": "bonus",
+        "subType": "wisdom-score",
+        "value": 1,
+        "componentId": 1878696,
+        "fixedValue": 1
+      }
+    ],
+    "condition": []
+  }
+}
